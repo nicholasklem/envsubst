@@ -11,6 +11,7 @@ func TestParseShellFormat(t *testing.T) {
 		input    string
 		expected []string
 	}{
+		// Basic cases
 		{"empty", "", nil},
 		{"no vars", "hello world", nil},
 		{"single $VAR", "$FOO", []string{"FOO"}},
@@ -18,10 +19,44 @@ func TestParseShellFormat(t *testing.T) {
 		{"multiple vars", "$FOO $BAR ${BAZ}", []string{"FOO", "BAR", "BAZ"}},
 		{"adjacent vars", "$FOO${BAR}$BAZ", []string{"FOO", "BAR", "BAZ"}},
 		{"with text", "hello $FOO world ${BAR} end", []string{"FOO", "BAR"}},
+
+		// Escaping
 		{"escaped $$", "$$FOO $BAR", []string{"BAR"}},
+		{"double escaped $$$$", "$$$$FOO $BAR", []string{"BAR"}},
+		{"escaped in middle", "$FOO $$BAR $BAZ", []string{"FOO", "BAZ"}},
+
+		// Underscore handling
 		{"underscore ignored", "$_ $FOO ${_}", []string{"FOO"}},
+		{"underscore in name", "$FOO_BAR", []string{"FOO_BAR"}},
+		{"leading underscore", "$_FOO", []string{"_FOO"}},
+
+		// Operators in ${} syntax
 		{"with operators stripped", "${FOO:-default} ${BAR:=value}", []string{"FOO", "BAR"}},
+		{"plus operator", "${FOO:+alternate}", []string{"FOO"}},
+		{"dash operator", "${FOO-default}", []string{"FOO"}},
+		{"equals operator", "${FOO=default}", []string{"FOO"}},
+
+		// Edge cases
+		{"trailing $", "hello$", nil},
+		{"$ followed by space", "$ FOO $BAR", []string{"BAR"}},
+		{"$ followed by special", "$! $@ $# $BAR", []string{"BAR"}},
+		{"empty braces ${}", "${} $FOO", []string{"FOO"}},
+		{"unclosed brace", "${FOO $BAR", []string{"FOO $BAR"}}, // reads to end
+		{"just $", "$", nil},
+		{"just ${", "${", nil},
+
+		// Numeric vars: a8m/envsubst allows by default (unlike GNU which ignores)
+		// This is intentional - use -no-digit flag if you want GNU behavior
+		{"numeric var $1", "$1 $FOO", []string{"1", "FOO"}},
+		{"numeric braced ${1}", "${1} $FOO", []string{"1", "FOO"}},
+		{"numeric start ${123ABC}", "${123ABC}", []string{"123ABC"}},
+
+		// Duplicates (not deduplicated - that's OK)
+		{"duplicate vars", "$FOO $FOO $FOO", []string{"FOO", "FOO", "FOO"}},
+
+		// Real-world ARGOCD_ENV_ patterns
 		{"complex", "$ARGOCD_ENV_FOO ${ARGOCD_ENV_BAR:-default}", []string{"ARGOCD_ENV_FOO", "ARGOCD_ENV_BAR"}},
+		{"argocd pattern", "$ARGOCD_ENV_CLUSTER $ARGOCD_ENV_DOMAIN $ARGOCD_ENV_SHARD", []string{"ARGOCD_ENV_CLUSTER", "ARGOCD_ENV_DOMAIN", "ARGOCD_ENV_SHARD"}},
 	}
 
 	for _, test := range tests {
