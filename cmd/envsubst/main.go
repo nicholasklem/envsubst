@@ -18,17 +18,27 @@ var (
 	noUnset  = flag.Bool("no-unset", false, "")
 	noEmpty  = flag.Bool("no-empty", false, "")
 	failFast = flag.Bool("fail-fast", false, "")
+	varsOnly = flag.Bool("v", false, "")
 )
 
-var usage = `Usage: envsubst [options...] <input>
+var usage = `Usage: envsubst [options...] [SHELL-FORMAT]
 Options:
   -i         Specify file input, otherwise use last argument as input file.
              If no input file is specified, read from stdin.
   -o         Specify file output. If none is specified, write to stdout.
+  -v         Output the variables occurring in SHELL-FORMAT (requires SHELL-FORMAT).
   -no-digit  Do not replace variables starting with a digit. e.g. $1 and ${1}
   -no-unset  Fail if a variable is not set.
   -no-empty  Fail if a variable is set but empty.
   -fail-fast Fail on first error otherwise display all failures if restrictions are set.
+
+When SHELL-FORMAT is provided, only variables referenced in it are substituted.
+Other variable references are left as literal text in the output.
+
+Examples:
+  envsubst < input.txt                         # substitute all variables
+  envsubst '$USER $HOME' < input.txt           # only substitute $USER and $HOME
+  envsubst -v '$USER $HOME'                    # output: USER\nHOME
 `
 
 func main() {
@@ -36,6 +46,25 @@ func main() {
 		fmt.Fprint(os.Stderr, fmt.Sprintf(usage))
 	}
 	flag.Parse()
+
+	// Get positional argument as SHELL-FORMAT (GNU envsubst compatibility)
+	var shellFormat string
+	if flag.NArg() > 0 {
+		shellFormat = flag.Arg(0)
+	}
+
+	// Handle -v flag: output variable names from SHELL-FORMAT and exit
+	if *varsOnly {
+		if shellFormat == "" {
+			usageAndExit("-v requires a SHELL-FORMAT argument")
+		}
+		vars := parse.ParseShellFormat(shellFormat)
+		for _, v := range vars {
+			fmt.Println(v)
+		}
+		return
+	}
+
 	var reader *bufio.Reader
 	if *input != "" {
 		file, err := os.Open(*input)
@@ -82,7 +111,14 @@ func main() {
 		parserMode = parse.Quick
 	}
 	restrictions := &parse.Restrictions{*noUnset, *noEmpty, *noDigit}
-	result, err := (&parse.Parser{Name: "string", Env: os.Environ(), Restrict: restrictions, Mode: parserMode}).Parse(data)
+	allowedVars := parse.ShellFormatToMap(parse.ParseShellFormat(shellFormat))
+	result, err := (&parse.Parser{
+		Name:        "string",
+		Env:         os.Environ(),
+		Restrict:    restrictions,
+		Mode:        parserMode,
+		AllowedVars: allowedVars,
+	}).Parse(data)
 	if err != nil {
 		errorAndExit(err)
 	}

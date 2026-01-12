@@ -32,10 +32,11 @@ var (
 
 // Parser type initializer
 type Parser struct {
-	Name     string // name of the processing template
-	Env      Env
-	Restrict *Restrictions
-	Mode     Mode
+	Name        string // name of the processing template
+	Env         Env
+	Restrict    *Restrictions
+	Mode        Mode
+	AllowedVars map[string]bool // nil means all vars allowed; non-nil limits substitution to these vars
 	// parsing state;
 	lex       *lexer
 	token     [3]item // three-token lookahead
@@ -105,7 +106,8 @@ Loop:
 		case itemError:
 			return p.errorf(t.val)
 		case itemVariable:
-			varNode := NewVariable(strings.TrimPrefix(t.val, "$"), p.Env, p.Restrict)
+			varNode := NewVariable(strings.TrimPrefix(t.val, "$"), p.Env, p.Restrict, p.AllowedVars)
+			varNode.OriginalSrc = t.val // Store original like "$VAR"
 			p.nodes = append(p.nodes, varNode)
 		case itemLeftDelim:
 			if p.peek().typ == itemVariable {
@@ -129,16 +131,32 @@ Loop:
 func (p *Parser) action() (Node, error) {
 	var expType itemType
 	var defaultNode Node
-	varNode := NewVariable(p.next().val, p.Env, p.Restrict)
-Loop:
+	// Track start position for original source (after "${")
+	startPos := p.lex.lastPos
+	varNode := NewVariable(p.next().val, p.Env, p.Restrict, p.AllowedVars)
 	for {
 		switch t := p.next(); t.typ {
 		case itemRightDelim:
-			break Loop
+			// Capture original source including "${" and "}"
+			endPos := int(p.lex.lastPos) + 1
+			if endPos > len(p.lex.input) {
+				endPos = len(p.lex.input)
+			}
+			originalSrc := p.lex.input[startPos:endPos]
+			node := &SubstitutionNode{
+				NodeType:    NodeSubstitution,
+				ExpType:     expType,
+				Variable:    varNode,
+				Default:     defaultNode,
+				OriginalSrc: originalSrc,
+			}
+			return node, nil
 		case itemError:
 			return nil, p.errorf(t.val)
 		case itemVariable:
-			defaultNode = NewVariable(strings.TrimPrefix(t.val, "$"), p.Env, p.Restrict)
+			defVar := NewVariable(strings.TrimPrefix(t.val, "$"), p.Env, p.Restrict, p.AllowedVars)
+			defVar.OriginalSrc = t.val
+			defaultNode = defVar
 		case itemText:
 			n := NewText(t.val)
 		Text:
@@ -156,7 +174,6 @@ Loop:
 			expType = t.typ
 		}
 	}
-	return &SubstitutionNode{NodeSubstitution, expType, varNode, defaultNode}, nil
 }
 
 func (p *Parser) errorf(s string) error {

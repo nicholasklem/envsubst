@@ -39,16 +39,32 @@ func (t *TextNode) String() (string, error) {
 
 type VariableNode struct {
 	NodeType
-	Ident    string
-	Env      Env
-	Restrict *Restrictions
+	Ident       string
+	Env         Env
+	Restrict    *Restrictions
+	AllowedVars map[string]bool // nil means all vars allowed
+	OriginalSrc string          // Original source like "$VAR" for literal output when not allowed
 }
 
-func NewVariable(ident string, env Env, restrict *Restrictions) *VariableNode {
-	return &VariableNode{NodeVariable, ident, env, restrict}
+func NewVariable(ident string, env Env, restrict *Restrictions, allowedVars map[string]bool) *VariableNode {
+	return &VariableNode{
+		NodeType:    NodeVariable,
+		Ident:       ident,
+		Env:         env,
+		Restrict:    restrict,
+		AllowedVars: allowedVars,
+	}
 }
 
 func (t *VariableNode) String() (string, error) {
+	// If filtering is enabled and this var is not in the allowed list,
+	// return original source as literal text
+	if t.AllowedVars != nil && !t.AllowedVars[t.Ident] {
+		if t.OriginalSrc != "" {
+			return t.OriginalSrc, nil
+		}
+		return "$" + t.Ident, nil
+	}
 	if err := t.validateNoUnset(); err != nil {
 		return "", err
 	}
@@ -79,12 +95,22 @@ func (t *VariableNode) validateNoEmpty(value string) error {
 
 type SubstitutionNode struct {
 	NodeType
-	ExpType  itemType
-	Variable *VariableNode
-	Default  Node // Default could be variable or text
+	ExpType     itemType
+	Variable    *VariableNode
+	Default     Node   // Default could be variable or text
+	OriginalSrc string // Original source like "${VAR:-default}" for literal output when not allowed
 }
 
 func (t *SubstitutionNode) String() (string, error) {
+	// If filtering is enabled and this var is not in the allowed list,
+	// return original source as literal text
+	if t.Variable.AllowedVars != nil && !t.Variable.AllowedVars[t.Variable.Ident] {
+		if t.OriginalSrc != "" {
+			return t.OriginalSrc, nil
+		}
+		// Fallback: reconstruct basic form
+		return "${" + t.Variable.Ident + "}", nil
+	}
 	if t.ExpType >= itemPlus && t.Default != nil {
 		switch t.ExpType {
 		case itemColonDash, itemColonEquals:
