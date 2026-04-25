@@ -111,11 +111,14 @@ var parseTests = []parseTest{
 	{"$var and $OTHER empty +", "${EMPTY+$ALSO_EMPTY}", "", errEmpty},
 	{"$var and $OTHER empty :+", "${EMPTY:+$ALSO_EMPTY}", "", errEmpty},
 
-	// escaping.
-	{"escape $$var", "FOO $$BAR BAZ", "FOO $BAR BAZ", errNone},
-	{"escape $${subst}", "FOO $${BAR} BAZ", "FOO ${BAR} BAZ", errNone},
-	{"escape $$$var", "$$$BAR", "$bar", errNone},
-	{"escape $$${subst}", "$$${BAZ:-baz}", "$baz", errNone},
+	// "$$" is preserved as literal text in this fork (see lex.go). Upstream
+	// a8m/envsubst would collapse "$$" to "$" as a shell-style escape; we
+	// don't, because it silently mangles inputs that contain literal "$$"
+	// (e.g. KEDA CRD descriptions, Makefile-style snippets quoted in YAML).
+	{"literal $$var", "FOO $$BAR BAZ", "FOO $$BAR BAZ", errNone},
+	{"literal $${subst}", "FOO $${BAR} BAZ", "FOO $${BAR} BAZ", errNone},
+	{"literal $$$var", "$$$BAR", "$$bar", errNone},
+	{"literal $$${subst}", "$$${BAZ:-baz}", "$$baz", errNone},
 }
 
 var negativeParseTests = []parseTest{
@@ -245,6 +248,15 @@ func TestParseWithPrefixFilter(t *testing.T) {
 		// Real world ArgoCD pattern
 		{"argocd health check pattern", "path: ${ARGOCD_ENV_HEALTH_PATH:-/ping}", "path: /ping"},
 		{"argocd service name pattern", "name: ${ARGOCD_ENV_SERVICE_NAME:-$ARGOCD_ENV_FOO}", "name: foo"},
+
+		// KEDA CRD scenario: upstream chart embeds Kubernetes' own env-var
+		// expansion docs in CRD schema descriptions. Those strings contain
+		// literal "$$" that must NOT be collapsed, or ArgoCD shows perpetual
+		// drift between desired ($) and live ($$). See parse/lex.go.
+		{"keda crd description literal $$", "description: Double $$ are reduced to a single $", "description: Double $$ are reduced to a single $"},
+		{"keda kubelet escape literal", "value: $$(VAR_NAME) literal", "value: $$(VAR_NAME) literal"},
+		{"literal $$ alongside prefix var", "$ARGOCD_ENV_FOO sees Double $$ are reduced", "foo sees Double $$ are reduced"},
+		{"literal $$ alongside default", "${ARGOCD_ENV_HEALTH_PATH:-/ping} and $$VAR", "/ping and $$VAR"},
 	}
 
 	for _, test := range tests {
