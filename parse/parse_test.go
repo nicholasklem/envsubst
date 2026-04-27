@@ -119,6 +119,18 @@ var parseTests = []parseTest{
 	{"literal $${subst}", "FOO $${BAR} BAZ", "FOO $${BAR} BAZ", errNone},
 	{"literal $$$var", "$$$BAR", "$$bar", errNone},
 	{"literal $$${subst}", "$$${BAZ:-baz}", "$$baz", errNone},
+	// "$$" inside a substitution operand is unaffected by this fork's lexer
+	// change (lexSubstitution path is unchanged). Pinning the behavior so a
+	// future refactor doesn't silently regress it.
+	{"literal $$ in default operand", "${UNSET:-pre$$post}", "pre$$post", errNone},
+	{"literal $$ in := default operand", "${UNSET:=pre$$post}", "pre$$post", errNone},
+
+	// Combining literal $$ with a substitution — pins the documented forms in
+	// README.md so docs and behavior can't drift apart silently.
+	{"$$ then var triple-dollar", "$$$BAR", "$$bar", errNone},
+	{"$$ then var space-braced", "$$ ${BAR}", "$$ bar", errNone},
+	{"$$ then var no-braces does NOT substitute", "$$BAR", "$$BAR", errNone},
+	{"$$ then var no-space-braced does NOT substitute", "$${BAR}", "$${BAR}", errNone},
 }
 
 var negativeParseTests = []parseTest{

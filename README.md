@@ -27,10 +27,30 @@ rendering step. Two deliberate deviations from upstream:
    shows perpetual `$$ → $` drift on synced resources. This fork emits `$$` as
    literal text.
 
-The fork is intentionally narrow: same parser, same operators (`${VAR:-default}`,
-`${VAR:=default}`, `${VAR:+alt}`, `${VAR:?err}`), same restrictions
-(`-no-unset`, `-no-empty`, `-fail-fast`), same library API. It is not a generic
-shell-templating tool; if you want shell-style `$$` escapes, use upstream.
+The fork is intentionally narrow: same parser, same library API, same
+restrictions (`-no-unset`, `-no-empty`, `-fail-fast`). **Shell-style parameter
+expansion operators are preserved** — `${VAR:-default}`, `${VAR:=default}`,
+`${VAR:+alt}`, `${VAR:?err}`, `${VAR-default}`, `${VAR=default}`,
+`${VAR+alt}`, `${VAR?err}` all work as in upstream. Only the `$$` escape
+behavior is dropped. If you want shell-style `$$` escapes, use upstream
+[a8m/envsubst](https://github.com/a8m/envsubst) instead.
+
+#### Combining literal `$$` with a substitution
+
+After this change, `$$VAR` does **not** substitute `VAR` — both `$` characters
+are consumed as literal text and `VAR` becomes plain text without a leading `$`
+to mark it as a variable reference. The same applies to `$${VAR}`: the `$$`
+consumes both dollars, leaving `{VAR}` as plain text rather than a substitution.
+
+To emit literal `$$` followed by a substituted variable, use one of:
+
+```
+input:  $$$ARGOCD_ENV_FOO    →  output: $$<value-of-FOO>   (triple-dollar; third $ starts the variable)
+input:  $$ ${ARGOCD_ENV_FOO} →  output: $$ <value-of-FOO>  (space-separated)
+
+input:  $$ARGOCD_ENV_FOO     →  output: $$ARGOCD_ENV_FOO   (no substitution)
+input:  $${ARGOCD_ENV_FOO}   →  output: $${ARGOCD_ENV_FOO} (no substitution)
+```
 
 #### Installation:
 
